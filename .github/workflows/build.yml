@@ -76,8 +76,8 @@ jobs:
                   applicationId = "com.example.switcher"
                   minSdk = 26
                   targetSdk = 35
-                  versionCode = 2
-                  versionName = "2.0"
+                  versionCode = 3
+                  versionName = "3.0"
               }
 
               compileOptions {
@@ -102,10 +102,15 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
               <queries>
+
                   <intent>
-                      <action android:name="android.intent.action.MAIN" />
-                      <category android:name="android.intent.category.LAUNCHER" />
+                      <action
+                          android:name="android.intent.action.MAIN" />
+
+                      <category
+                          android:name="android.intent.category.LAUNCHER" />
                   </intent>
+
               </queries>
 
               <uses-permission
@@ -280,13 +285,24 @@ jobs:
               private val handler =
                   Handler(Looper.getMainLooper())
 
-              private val recentApps =
-                  ArrayDeque<String>()
+              /*
+               * 현재 사용 중인 앱
+               */
+              private var currentApp: String? = null
 
+              /*
+               * 현재 앱 바로 직전에 사용했던 앱
+               */
+              private var previousApp: String? = null
+
+              /*
+               * UsageEvents를 읽기 시작할 시간
+               */
               private var lastCheckedTime =
                   System.currentTimeMillis()
 
               private val usageStatsManager by lazy {
+
                   getSystemService(
                       Context.USAGE_STATS_SERVICE
                   ) as UsageStatsManager
@@ -297,11 +313,11 @@ jobs:
 
                       override fun run() {
 
-                          updateRecentApps()
+                          updateAppHistory()
 
                           handler.postDelayed(
                               this,
-                              500
+                              300
                           )
                       }
                   }
@@ -336,8 +352,11 @@ jobs:
                       notification
                   )
 
-                  lastCheckedTime =
-                      System.currentTimeMillis()
+                  /*
+                   * 서비스가 시작되기 직전의 앱 상태를
+                   * 알아내기 위해 최근 30초의 기록을 확인한다.
+                   */
+                  initializeAppHistory()
 
                   showButton()
 
@@ -346,7 +365,54 @@ jobs:
                   )
               }
 
-              private fun updateRecentApps() {
+              /*
+               * 서비스가 처음 시작될 때
+               * 최근 앱 기록을 확인한다.
+               */
+              private fun initializeAppHistory() {
+
+                  val now =
+                      System.currentTimeMillis()
+
+                  val begin =
+                      now - 30_000L
+
+                  val events =
+                      usageStatsManager.queryEvents(
+                          begin,
+                          now
+                      )
+
+                  val event =
+                      UsageEvents.Event()
+
+                  while (
+                      events.hasNextEvent()
+                  ) {
+
+                      events.getNextEvent(
+                          event
+                      )
+
+                      if (
+                          event.eventType ==
+                          UsageEvents.Event.ACTIVITY_RESUMED
+                      ) {
+
+                          registerApp(
+                              event.packageName
+                          )
+                      }
+                  }
+
+                  lastCheckedTime = now
+              }
+
+              /*
+               * 새로운 앱이 화면에 나타났을 때
+               * 현재 앱과 이전 앱을 갱신한다.
+               */
+              private fun updateAppHistory() {
 
                   val now =
                       System.currentTimeMillis()
@@ -373,34 +439,70 @@ jobs:
                           UsageEvents.Event.ACTIVITY_RESUMED
                       ) {
 
-                          val app =
+                          registerApp(
                               event.packageName
-
-                          if (
-                              app != packageName &&
-                              app != "com.android.settings"
-                          ) {
-
-                              recentApps.remove(app)
-
-                              recentApps.addLast(app)
-
-                              while (
-                                  recentApps.size > 10
-                              ) {
-                                  recentApps.removeFirst()
-                              }
-                          }
+                          )
                       }
                   }
 
                   lastCheckedTime = now
               }
 
+              /*
+               * 앱 전환 기록을 갱신한다.
+               */
+              private fun registerApp(
+                  app: String?
+              ) {
+
+                  if (app == null) {
+                      return
+                  }
+
+                  /*
+                   * 스위쳐 자체는 기록하지 않는다.
+                   */
+                  if (app == packageName) {
+                      return
+                  }
+
+                  /*
+                   * 설정 앱도 기록하지 않는다.
+                   */
+                  if (
+                      app ==
+                      "com.android.settings"
+                  ) {
+                      return
+                  }
+
+                  /*
+                   * 같은 앱이 계속 보고되는 경우에는
+                   * 기록을 바꾸지 않는다.
+                   */
+                  if (app == currentApp) {
+                      return
+                  }
+
+                  /*
+                   * 현재 앱을 이전 앱으로 이동
+                   */
+                  previousApp =
+                      currentApp
+
+                  /*
+                   * 새 앱을 현재 앱으로 지정
+                   */
+                  currentApp =
+                      app
+              }
+
               private fun showButton() {
 
                   if (!Settings.canDrawOverlays(this)) {
+
                       stopSelf()
+
                       return
                   }
 
@@ -419,8 +521,11 @@ jobs:
                       TextView(this).apply {
 
                           text = "↔"
+
                           textSize = 23f
-                          gravity = Gravity.CENTER
+
+                          gravity =
+                              Gravity.CENTER
 
                           setTextColor(
                               Color.WHITE
@@ -477,13 +582,16 @@ jobs:
                               Gravity.START
 
                           x = 30
+
                           y = 400
                       }
 
                   var downX = 0f
+
                   var downY = 0f
 
                   var startX = 0
+
                   var startY = 0
 
                   var moved = false
@@ -507,7 +615,9 @@ jobs:
                       _,
                       event ->
 
-                      when (event.actionMasked) {
+                      when (
+                          event.actionMasked
+                      ) {
 
                           MotionEvent.ACTION_DOWN -> {
 
@@ -523,7 +633,8 @@ jobs:
                               startY =
                                   params.y
 
-                              moved = false
+                              moved =
+                                  false
 
                               longPressTriggered =
                                   false
@@ -539,17 +650,20 @@ jobs:
                           MotionEvent.ACTION_MOVE -> {
 
                               val dx =
-                                  event.rawX - downX
+                                  event.rawX -
+                                  downX
 
                               val dy =
-                                  event.rawY - downY
+                                  event.rawY -
+                                  downY
 
                               if (
                                   abs(dx) > 8 ||
                                   abs(dy) > 8
                               ) {
 
-                                  moved = true
+                                  moved =
+                                      true
 
                                   handler.removeCallbacks(
                                       longPressRunnable
@@ -608,58 +722,83 @@ jobs:
                       params
                   )
 
-                  floatingButton = button
+                  floatingButton =
+                      button
               }
 
+              /*
+               * 버튼을 짧게 눌렀을 때
+               * 바로 직전에 사용했던 앱으로 이동한다.
+               */
               private fun switchToPreviousApp() {
 
-                  if (recentApps.isEmpty()) {
+                  val target =
+                      previousApp
+                          ?: return
+
+                  /*
+                   * 대상 앱이 스위쳐나 설정이면
+                   * 전환하지 않는다.
+                   */
+                  if (
+                      target == packageName ||
+                      target ==
+                      "com.android.settings"
+                  ) {
                       return
                   }
 
-                  val candidates =
-                      recentApps
-                          .toList()
-                          .asReversed()
-
-                  for (target in candidates) {
-
-                      if (
-                          target == packageName ||
-                          target == "com.android.settings"
-                      ) {
-                          continue
-                      }
-
-                      val intent =
-                          packageManager
-                              .getLaunchIntentForPackage(
-                                  target
-                              )
-
-                      if (intent != null) {
-
-                          intent.addFlags(
-                              Intent.FLAG_ACTIVITY_NEW_TASK or
-                              Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                  val intent =
+                      packageManager
+                          .getLaunchIntentForPackage(
+                              target
                           )
+                          ?: return
 
-                          try {
+                  intent.addFlags(
+                      Intent.FLAG_ACTIVITY_NEW_TASK or
+                      Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                  )
 
-                              startActivity(intent)
+                  try {
 
-                              return
+                      /*
+                       * 앱을 실행한다.
+                       */
+                      startActivity(intent)
 
-                          } catch (
-                              _: Exception
-                          ) {
+                      /*
+                       * 중요:
+                       *
+                       * 현재 앱과 이전 앱을 즉시 서로 교환한다.
+                       *
+                       * UsageStats 갱신을 기다리지 않아도
+                       * 연속 버튼 입력이 가능하도록 한다.
+                       */
+                      val oldCurrent =
+                          currentApp
 
-                              continue
-                          }
-                      }
+                      currentApp =
+                          target
+
+                      previousApp =
+                          oldCurrent
+
+                  } catch (
+                      _: Exception
+                  ) {
+
+                      /*
+                       * 실행 실패 시에는
+                       * 기록을 변경하지 않는다.
+                       */
                   }
               }
 
+              /*
+               * 3초 이상 길게 눌렀을 때
+               * 스위쳐 앱으로 돌아간다.
+               */
               private fun openSwitcher() {
 
                   val intent =
@@ -710,12 +849,14 @@ jobs:
                   floatingButton?.let {
 
                       runCatching {
+
                           windowManager
                               .removeView(it)
                       }
                   }
 
-                  floatingButton = null
+                  floatingButton =
+                      null
 
                   super.onDestroy()
               }
