@@ -76,8 +76,8 @@ jobs:
                   applicationId = "com.example.switcher"
                   minSdk = 26
                   targetSdk = 35
-                  versionCode = 1
-                  versionName = "1.0"
+                  versionCode = 2
+                  versionName = "2.0"
               }
 
               compileOptions {
@@ -100,6 +100,13 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
 
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <queries>
+                  <intent>
+                      <action android:name="android.intent.action.MAIN" />
+                      <category android:name="android.intent.category.LAUNCHER" />
+                  </intent>
+              </queries>
 
               <uses-permission
                   android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
@@ -273,7 +280,8 @@ jobs:
               private val handler =
                   Handler(Looper.getMainLooper())
 
-              private var lastForegroundPackage: String? = null
+              private val recentApps =
+                  ArrayDeque<String>()
 
               private var lastCheckedTime =
                   System.currentTimeMillis()
@@ -289,11 +297,11 @@ jobs:
 
                       override fun run() {
 
-                          updateLastUsedApp()
+                          updateRecentApps()
 
                           handler.postDelayed(
                               this,
-                              300
+                              500
                           )
                       }
                   }
@@ -315,7 +323,7 @@ jobs:
                               "스위쳐 실행 중"
                           )
                           .setContentText(
-                              "버튼을 눌러 이전 앱으로 이동"
+                              "짧게 누르면 이전 앱, 3초 이상 누르면 스위쳐"
                           )
                           .setOngoing(true)
                           .setPriority(
@@ -328,17 +336,17 @@ jobs:
                       notification
                   )
 
-                  showButton()
-
                   lastCheckedTime =
                       System.currentTimeMillis()
+
+                  showButton()
 
                   handler.post(
                       trackRunnable
                   )
               }
 
-              private fun updateLastUsedApp() {
+              private fun updateRecentApps() {
 
                   val now =
                       System.currentTimeMillis()
@@ -362,22 +370,26 @@ jobs:
 
                       if (
                           event.eventType ==
-                          UsageEvents.Event
-                              .ACTIVITY_RESUMED
+                          UsageEvents.Event.ACTIVITY_RESUMED
                       ) {
 
-                          val packageName =
+                          val app =
                               event.packageName
 
                           if (
-                              packageName !=
-                              this.packageName &&
-                              packageName !=
-                              "com.android.settings"
+                              app != packageName &&
+                              app != "com.android.settings"
                           ) {
 
-                              lastForegroundPackage =
-                                  packageName
+                              recentApps.remove(app)
+
+                              recentApps.addLast(app)
+
+                              while (
+                                  recentApps.size > 10
+                              ) {
+                                  recentApps.removeFirst()
+                              }
                           }
                       }
                   }
@@ -601,30 +613,51 @@ jobs:
 
               private fun switchToPreviousApp() {
 
-                  val target =
-                      lastForegroundPackage
-                          ?: return
-
-                  if (
-                      target == packageName ||
-                      target == "com.android.settings"
-                  ) {
+                  if (recentApps.isEmpty()) {
                       return
                   }
 
-                  val intent =
-                      packageManager
-                          .getLaunchIntentForPackage(
-                              target
+                  val candidates =
+                      recentApps
+                          .toList()
+                          .asReversed()
+
+                  for (target in candidates) {
+
+                      if (
+                          target == packageName ||
+                          target == "com.android.settings"
+                      ) {
+                          continue
+                      }
+
+                      val intent =
+                          packageManager
+                              .getLaunchIntentForPackage(
+                                  target
+                              )
+
+                      if (intent != null) {
+
+                          intent.addFlags(
+                              Intent.FLAG_ACTIVITY_NEW_TASK or
+                              Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
                           )
-                          ?: return
 
-                  intent.addFlags(
-                      Intent.FLAG_ACTIVITY_NEW_TASK or
-                      Intent.FLAG_ACTIVITY_SINGLE_TOP
-                  )
+                          try {
 
-                  startActivity(intent)
+                              startActivity(intent)
+
+                              return
+
+                          } catch (
+                              _: Exception
+                          ) {
+
+                              continue
+                          }
+                      }
+                  }
               }
 
               private fun openSwitcher() {
@@ -672,10 +705,6 @@ jobs:
 
                   handler.removeCallbacks(
                       trackRunnable
-                  )
-
-                  handler.removeCallbacks(
-                      Runnable {}
                   )
 
                   floatingButton?.let {
